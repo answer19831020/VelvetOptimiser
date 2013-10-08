@@ -589,7 +589,7 @@ sub runVelveth_ser {
     return $seq_path;
 }
 
-sub runVelveth_thr{
+sub runVelveth_thr {
 	
     {
 	lock($current_threads);
@@ -611,7 +611,8 @@ sub runVelveth_thr{
     my ($seqname, $seqpath, $seqsuffix) = fileparse($seqs_path, qr/\.[^.]*/);
     my $dir = $prefix."_data_$hv";
     make_path($dir, {verbose => 0, mode => 0711,});
-    my $lncmd = `ln -s $seqs_path $dir/$seqname`;
+    my $can_symlink = eval { symlink($seqs_path, "$dir/$seqname"); 1 };
+    die "ERROR: Can't make link on this OS." unless $can_symlink;
     my $vhline = $prefix . "_data_$hv $hv -reuse_Sequences";
     
     #make a new VelvetAssembly and store it in the %assemblies hash...
