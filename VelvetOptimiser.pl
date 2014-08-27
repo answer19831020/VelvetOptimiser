@@ -1,4 +1,4 @@
-#!/usr/bin/env perl
+#!/usr/bin/perl
 #
 #       VelvetOptimiser.pl
 #
@@ -172,27 +172,27 @@ if($amos){
 
 #build the hashval array - steps too...
 for(my $i = $hashs; $i <= $hashe; $i += $hashstep){
-    #print STDERR "i is $i\n";
+	#print STDERR "i is $i\n";
     push @hashvals, $i;
 }
 
 #check for $hashe in array..
 my $max = $hashvals[-1];  # last element in array
 if($max < $hashe){
-    push @hashvals, $hashe;
+	push @hashvals, $hashe;
 }
 
 if($genomesize){
-    my $x = &estMemUse();
-    printf STDERR "\nMemory use estimated to be: %.1fGB for $num_threads threads.\n\n", $x;
-    if ($x < $currfreemem){
-	print STDERR "You should have enough memory to complete this job. (Though this estimate is no guarantee..)\n";
-	exit;
-    }
-    else {
-	print STDERR "You probably won't have enough memory to run this job.\nTry decreasing the maximum number of threads used.\n(use the -t option to set max threads.)\n";
-	exit;
-    }
+	my $x = &estMemUse();
+	printf STDERR "\nMemory use estimated to be: %.1fGB for $num_threads threads.\n\n", $x;
+	if ($x < $currfreemem){
+		print STDERR "You should have enough memory to complete this job. (Though this estimate is no guarantee..)\n";
+		exit;
+	}
+	else {
+		print STDERR "You probably won't have enough memory to run this job.\nTry decreasing the maximum number of threads used.\n(use the -t option to set max threads.)\n";
+		exit;
+	}
 }
 
 
@@ -243,7 +243,6 @@ for my $thr (threads->list) {
     #print STDERR "Waiting for thread ",$thr->tid," to complete.\n";
     $thr->join;
 }
-###
 
 #now run velvetg for the all the hashvalues in a certain number of threads..
 #first get velvetg's version number.
@@ -439,8 +438,8 @@ sub setOptions {
 		{OPT=>"t|threads=i", VAR=>\$num_threads, DEFAULT=>$thmax, DESC=>"The maximum number of simulataneous velvet instances to run."},
 		{OPT=>"g|genomesize=f", VAR=>\$genomesize, DEFAULT=>0, DESC=>"The approximate size of the genome to be assembled in megabases.\n\t\t\tOnly used in memory use estimation. If not specified, memory use estimation\n\t\t\twill not occur. If memory use is estimated, the results are shown and then program exits."},
 		{OPT=>"k|optFuncKmer=s", VAR=>\$opt_func, DEFAULT=>'n50', DESC=>"The optimisation function used for k-mer choice."},
-	        {OPT=>"c|optFuncCov=s", VAR=>\$opt_func2, DEFAULT=>'Lbp', DESC=>"The optimisation function used for cov_cutoff optimisation."},
-	        {OPT=>"m|minCovCutoff=f", VAR=>\$minCovCutoff, DEFAULT=>0, DESC=>"The minimum cov_cutoff to be used."},
+		{OPT=>"c|optFuncCov=s", VAR=>\$opt_func2, DEFAULT=>'Lbp', DESC=>"The optimisation function used for cov_cutoff optimisation."},
+        {OPT=>"m|minCovCutoff=f", VAR=>\$minCovCutoff, DEFAULT=>0, DESC=>"The minimum cov_cutoff to be used."},
 		{OPT=>"p|prefix=s", VAR=>\$prefix, DEFAULT=>'auto', DESC=>"The prefix for the output filenames, the default is the date and time in the format DD-MM-YYYY-HH-MM_."},
 		{OPT=>"d|dir_final=s", VAR=>\$finaldir, DEFAULT=>'.', DESC=>"The name of the directory to put the final output into."},
 		{OPT=>"z|upperCovCutoff=f", VAR=>\$upperCovCutoff, DEFAULT=>0.8, DESC=>"The maximum coverage cutoff to consider as a multiplier of the expected coverage."},
@@ -563,7 +562,7 @@ sub runVelveth_ser {
     #run velveth on this assembly object                                                                                                                      
     my $vhresponse = VelvetOpt::hwrap::objectVelveth($assembly, $categories);
 
-    unless ($vhresponse) { die "Velveth didn't run on hash value of $hv.\n$!\n";}
+    unless($vhresponse){ die "Velveth didn't run on hash value of $hv.\n$!\n";}
 
     unless (-r ($prefix . "_data_$hv" . "/Roadmaps")){
         print STDERR "Velveth failed!  Response:\n$vhresponse\n";
@@ -622,9 +621,9 @@ sub runVelveth_thr {
     #run velveth on this assembly object
     my $vhresponse = VelvetOpt::hwrap::objectVelveth($assembly, $categories);
 
-    unless ($vhresponse) { die "Velveth didn't run on hash value of $hv.\n$!\n";}
+    unless($vhresponse){ die "Velveth didn't run on hash value of $hv.\n$!\n";}
     
-    unless (-r ($prefix . "_data_$hv" . "/Roadmaps")){ 
+    unless(-r ($prefix . "_data_$hv" . "/Roadmaps")){ 
 	print STDERR "Velveth failed!  Response:\n$vhresponse\n";
 	{
 	    lock ($threadfailed);
