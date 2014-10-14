@@ -42,6 +42,12 @@ use Data::Dumper;
 use Storable qw (freeze thaw);
 use Getopt::Long;
 
+# use portable methods for file handling
+use Cwd qw(abs_path getcwd);
+use File::Copy;
+use File::Spec;
+use File::Basename;
+use File::Path qw(make_path remove_tree);
 
 #
 #   global var decs
@@ -211,23 +217,26 @@ if($amos){
 print STDERR strftime("%b %e %H:%M:%S", localtime), " Beginning velveth runs.\n";
 print $OUT strftime("%b %e %H:%M:%S", localtime), "\n\n\tBeginning velveth runs.\n";
 
-#now run velveth for all the hashvalues in a certain number of threads..
+### SES mod
 my @threads;
-foreach my $hashval (@hashvals){
-	#print STDERR "Hashval = $hashval Numthreads = $num_threads currentThreads = $current_threads\n";
-	while($current_threads >= $num_threads){
-		sleep(2);
-	}
-	if($threadfailed){
-		for my $thr (threads->list) {
-			print STDERR "Waiting for thread ",$thr->tid," to complete.\n";
-			$thr->join;
-		}
-		die "Velveth failed to run! Must be a problem with file types, check by running velveth manually or by using -v option and reading the log file.\n";
-	}	
-	$threads[$ass_num] = threads->create(\&runVelveth, $readfile, $hashval, $vhversion, \$logSem, $ass_num);
-	$ass_num ++;
+my $first_hashv = shift @hashvals;
+
+my $seqs_path  = runVelveth_ser($readfile, $first_hashv, $vhversion, \$logSem, $ass_num);
+
+for my $hashval (@hashvals) {
+    while ($current_threads >= $num_threads){
 	sleep(2);
+    }
+    if ($threadfailed){
+	for my $thr (threads->list) {
+	    print STDERR "Waiting for thread ",$thr->tid," to complete.\n";
+	    $thr->join;
+	}
+	die "Velveth failed to run! Must be a problem with file types, check by running velveth manually or by using -v option and reading the log file.\n";
+    }       
+    $threads[$ass_num] = threads->create(\&runVelveth_thr, $seqs_path, $readfile, $hashval, $vhversion, \$logSem, $ass_num);
+    $ass_num ++;
+    sleep(2);
 }
 
 for my $thr (threads->list) {
@@ -287,10 +296,10 @@ my $asmscorenotneg = 1;
 
 foreach my $key (keys %assembliesObjs){
 	if(($assembliesObjs{$key}->{assmscore} != -1) && $asmscorenotneg){
-    	if($assembliesObjs{$key}->{assmscore} > $maxScore){
+	    if($assembliesObjs{$key}->{assmscore} > $maxScore){
         	$bestId = $key;
         	$maxScore = $assembliesObjs{$key}->{assmscore};
-    	}
+	    }
 	}
 	elsif($assembliesObjs{$key}->{n50} && $asmscorenotneg){
 		if($assembliesObjs{$key}->{n50} > $maxScore){
@@ -301,9 +310,9 @@ foreach my $key (keys %assembliesObjs){
 	else {
 		$asmscorenotneg = 0;
 		if($assembliesObjs{$key}->{totalbp} > $maxScore){
-        	$bestId = $key;
-        	$maxScore = $assembliesObjs{$key}->{totalbp};
-    	}
+		    $bestId = $key;
+		    $maxScore = $assembliesObjs{$key}->{totalbp};
+		}
 	}
 }
 print "\n\nThe best assembly so far is:\n" if $interested;
@@ -323,7 +332,7 @@ print $OUT strftime("%b %e %H:%M:%S", localtime), " Optimisation routine chosen 
 
 if($optRoute eq "shortOpt"){
 	
-	&expCov($assembliesObjs{$bestId});
+    &expCov($assembliesObjs{$bestId});
     &covCutoff($assembliesObjs{$bestId});
 
 }
@@ -389,10 +398,17 @@ foreach my $key(keys %assemblies){
 		system('rm', '-r', '--preserve-root', $dir);
 	} 
 }
+
 unless ($finaldir eq "."){
 	rename $assembliesObjs{$bestId}->{ass_dir}, $finaldir;
 	rename $logfile, "$finaldir/$logfile";
 }
+
+#delete first hash val
+my $sdir = $prefix . "_data_$first_hashv";
+unlink("$finaldir/Sequences") if -e ("$finaldir/Sequences");
+copy("$sdir/Sequences", "$finaldir/Sequences") or die "ERROR: Copy failed: $!";
+remove_tree($sdir, {safe => 1});
 
 #
 #
@@ -432,76 +448,76 @@ sub setOptions {
 	(@ARGV < 1) && (usage());
 
 	&GetOptions(map {$_->{OPT}, $_->{VAR}} @Options) || usage();
-
+	
 	# Now setup default values.
 	foreach (@Options) {
-		if (defined($_->{DEFAULT}) && !defined(${$_->{VAR}})) {
+	    if (defined($_->{DEFAULT}) && !defined(${$_->{VAR}})) {
 		${$_->{VAR}} = $_->{DEFAULT};
-		}
+	    }
 	}
 	
 	if ($printVersion) {
-		print "VelvetOptimiser $OptVersion\n";
-		exit 0;
+	    print "VelvetOptimiser $OptVersion\n";
+	    exit 0;
         }
-
+	
 	print STDERR strftime("%b %e %H:%M:%S", localtime), " Starting to check input parameters.\n";
 	
 	unless($readfile){
-		print STDERR "\tYou must supply the velveth parameter line in quotes. eg -f '-short .....'\n";
-		&usage();
+	    print STDERR "\tYou must supply the velveth parameter line in quotes. eg -f '-short .....'\n";
+	    &usage();
 	}
 	
-    if($hashs > $maxhash){
-        print STDERR "\tStart hash value too high.  New start hash value is $maxhash.\n";
-        $hashs = $maxhash;
-    }
-    if(!&isOdd($hashs)){
-        $hashs = $hashs - 1;
-        print STDERR "\tStart hash value not odd.  Subtracting one. New start hash value = $hashs\n";
-    }
-    
-    if(&isOdd($hashstep)){
-		print STDERR "\tOld hash step value $hashstep\n";
-		$hashstep --;
-		print STDERR "\tHash search step value was odd, substracting one.  New hash step value = $hashstep\n";
+	if($hashs > $maxhash){
+	    print STDERR "\tStart hash value too high.  New start hash value is $maxhash.\n";
+	    $hashs = $maxhash;
+	}
+	if(!&isOdd($hashs)){
+	    $hashs = $hashs - 1;
+	    print STDERR "\tStart hash value not odd.  Subtracting one. New start hash value = $hashs\n";
+	}
+	
+	if(&isOdd($hashstep)){
+	    print STDERR "\tOld hash step value $hashstep\n";
+	    $hashstep --;
+	    print STDERR "\tHash search step value was odd, substracting one.  New hash step value = $hashstep\n";
 	}
 	if($hashstep > ($hashe - $hashs)){
-		$hashstep = $hashe - $hashs;
-		print STDERR "\tHash search step value was higher than start to end range.  Setting hash step to range. New hash step value = $hashstep\n";
+	    $hashstep = $hashe - $hashs;
+	    print STDERR "\tHash search step value was higher than start to end range.  Setting hash step to range. New hash step value = $hashstep\n";
 	}
 	if($hashstep < 2){
-		$hashstep = 2;
-		print STDERR "\tHash step set below minimum of 2.  New hash step value = 2\n";
+	    $hashstep = 2;
+	    print STDERR "\tHash step set below minimum of 2.  New hash step value = 2\n";
 	}	
 	if($hashe > $maxhash || $hashe < 1){
-        print STDERR "\tEnd hash value not in workable range.  New end hash value is $maxhash.\n";
-        $hashe = $maxhash;
-    }
-    if($hashe < $hashs){
-        print STDERR "\tEnd hash value lower than start hash value.  New end hash value = $hashs.\n";
-        $hashe = $hashs;
-    }
-    if(!&isOdd($hashe)){
-        $hashe = $hashe - 1;
-        print STDERR "\tEnd hash value not odd.  Subtracting one. New end hash value = $hashe\n";
-    }
-    
-    if($num_threads > $thmax){
-		print STDERR "\tWARNING: You have set the number of threads to use to a value greater than the number of available CPUs.\n";
-		print STDERR "\tWARNING: This may be because of the velvet compile option for OMP.\n";
+	    print STDERR "\tEnd hash value not in workable range.  New end hash value is $maxhash.\n";
+	    $hashe = $maxhash;
+	}
+	if($hashe < $hashs){
+	    print STDERR "\tEnd hash value lower than start hash value.  New end hash value = $hashs.\n";
+	    $hashe = $hashs;
+	}
+	if(!&isOdd($hashe)){
+	    $hashe = $hashe - 1;
+	    print STDERR "\tEnd hash value not odd.  Subtracting one. New end hash value = $hashe\n";
+	}
+	
+	if($num_threads > $thmax){
+	    print STDERR "\tWARNING: You have set the number of threads to use to a value greater than the number of available CPUs.\n";
+	    print STDERR "\tWARNING: This may be because of the velvet compile option for OMP.\n";
 	}
 	
 	#check the velveth parameter string..
 	my $vh_ok = VelvetOpt::hwrap::_checkVHString("check 21 $readfile", $categories);
-
+	
 	unless($vh_ok){ die "Please re-start with a corrected velveth parameter string." }
 	
 	print STDERR "\tVelveth parameter string OK.\n";
 	
 	#test if outdir exists...
 	if(-d $finaldir && $finaldir ne "."){
-		die "Output directory $finaldir already exists, please choose a different name and restart.\n";
+	    die "Output directory $finaldir already exists, please choose a different name and restart.\n";
 	}
 
 	print STDERR strftime("%b %e %H:%M:%S", localtime), " Finished checking input parameters.\n";
@@ -509,14 +525,14 @@ sub setOptions {
 }
 
 sub usage {
-	print "Usage: $0 [options] -f 'velveth input line'\n";
-	foreach (@Options) {
-		printf "  --%-13s %s%s.\n",$_->{OPT},$_->{DESC},
-			defined($_->{DEFAULT}) ? " (default '$_->{DEFAULT}')" : "";
-	}
-	print "\nAdvanced!: Changing the optimisation function(s)\n";
-	print VelvetOpt::Assembly::opt_func_toString;
-	exit(1);
+    print "Usage: $0 [options] -f 'velveth input line'\n";
+    foreach (@Options) {
+	printf "  --%-13s %s%s.\n",$_->{OPT},$_->{DESC},
+	defined($_->{DEFAULT}) ? " (default '$_->{DEFAULT}')" : "";
+    }
+    print "\nAdvanced!: Changing the optimisation function(s)\n";
+    print VelvetOpt::Assembly::opt_func_toString;
+    exit(1);
 }
  
 #----------------------------------------------------------------------
@@ -525,63 +541,117 @@ sub usage {
 #
 #	runVelveth
 #
+sub runVelveth_ser {
 
-sub runVelveth{
-	
-	{
-		lock($current_threads);
-		$current_threads ++;
-	}
-	
-	my $rf = shift;
-	my $hv = shift;
-	my $vv = shift;
-	my $semRef = shift;
-	my $anum = shift;
-	my $assembly;
-	
-	print STDERR strftime("%b %e %H:%M:%S", localtime), "\t\tRunning velveth with hash value: $hv.\n";
+    my $rf = shift;
+    my $hv = shift;
+    my $vv = shift;
+    my $semRef = shift;
+    my $anum = shift;
+    my $assembly;
 
-    #make the velveth command line.
+    print STDERR strftime("%b %e %H:%M:%S", localtime), "\t\tRunning velveth with hash value: $hv.\n";
+
+    #make the velveth command line.                                                                                                                           
+    $prefix =~ s/-/_/g if $prefix =~ /-/;
     my $vhline = $prefix . "_data_$hv $hv $rf";
 
-    #make a new VelvetAssembly and store it in the %assemblies hash...
-	$assembly = VelvetOpt::Assembly->new(ass_id => $anum, pstringh => $vhline, versionh =>$vv, assmfunc => $opt_func, assmfunc2 => $opt_func2);
+    #make a new VelvetAssembly and store it in the %assemblies hash...                                                                                        
+    $assembly = VelvetOpt::Assembly->new(ass_id => $anum, pstringh => $vhline, versionh => $vv, assmfunc => $opt_func, assmfunc2 => $opt_func2);
 
+    #run velveth on this assembly object                                                                                                                      
+    my $vhresponse = VelvetOpt::hwrap::objectVelveth($assembly, $categories);
+
+    unless($vhresponse){ die "Velveth didn't run on hash value of $hv.\n$!\n";}
+
+    unless (-r ($prefix . "_data_$hv" . "/Roadmaps")){
+        print STDERR "Velveth failed!  Response:\n$vhresponse\n";
+    }
+
+    #run the hashdetail generation routine.                                                                                                                   
+    $vhresponse = $assembly->getHashingDetails();
+
+    #print the objects to the log file...                                                                                                                     
+    {
+        lock($$semRef);
+        print $OUT $assembly->toStringNoV() if !$verbose;
+        print $OUT $assembly->toString() if $verbose;
+    }
+
+    {
+        lock(%assemblies);
+        my $ass_str = freeze($assembly);
+        $assemblies{$anum} = $ass_str;
+    }
+
+    print STDERR strftime("%b %e %H:%M:%S", localtime), "\t\tVelveth with hash value $hv finished.\n";
+    my $seq_path = abs_path($prefix."_data_$hv"."/Sequences");
+    return $seq_path;
+}
+
+sub runVelveth_thr {
+	
+    {
+	lock($current_threads);
+	$current_threads ++;
+    }
+    
+    my $seqs_path = shift;
+    my $rf = shift;
+    my $hv = shift;
+    my $vv = shift;
+    my $semRef = shift;
+    my $anum = shift;
+    my $assembly;
+    
+    print STDERR strftime("%b %e %H:%M:%S", localtime), "\t\tRunning velveth with hash value: $hv.\n";
+    
+    #make the velveth command line.
+    $prefix =~ s/-/_/g if $prefix =~ /-/;
+    my ($seqname, $seqpath, $seqsuffix) = fileparse($seqs_path, qr/\.[^.]*/);
+    my $dir = $prefix."_data_$hv";
+    make_path($dir, {verbose => 0, mode => 0711,});
+    my $can_symlink = eval { symlink($seqs_path, "$dir/$seqname"); 1 };
+    die "ERROR: Can't make link on this OS." unless $can_symlink;
+    my $vhline = $prefix . "_data_$hv $hv -reuse_Sequences";
+    
+    #make a new VelvetAssembly and store it in the %assemblies hash...
+    $assembly = VelvetOpt::Assembly->new(ass_id => $anum, pstringh => $vhline, versionh =>$vv, assmfunc => $opt_func, assmfunc2 => $opt_func2);
+ 
     #run velveth on this assembly object
     my $vhresponse = VelvetOpt::hwrap::objectVelveth($assembly, $categories);
 
     unless($vhresponse){ die "Velveth didn't run on hash value of $hv.\n$!\n";}
-	
-	unless(-r ($prefix . "_data_$hv" . "/Roadmaps")){ 
-		print STDERR "Velveth failed!  Response:\n$vhresponse\n";
-		{
-			lock ($threadfailed);
-			$threadfailed = 1;
-		}
-	}
     
-	#run the hashdetail generation routine.
+    unless(-r ($prefix . "_data_$hv" . "/Roadmaps")){ 
+	print STDERR "Velveth failed!  Response:\n$vhresponse\n";
+	{
+	    lock ($threadfailed);
+	    $threadfailed = 1;
+	}
+    }
+    
+    #run the hashdetail generation routine.
     $vhresponse = $assembly->getHashingDetails();
     
-	#print the objects to the log file...
-	{
-		lock($$semRef);
-		print $OUT $assembly->toStringNoV() if !$verbose;
-		print $OUT $assembly->toString() if $verbose;
-	}
-	
-	{
-		lock(%assemblies);
-		my $ass_str = freeze($assembly);
-		$assemblies{$anum} = $ass_str;
-	}
-	
-	{
-		lock($current_threads);
-		$current_threads --;
-	}
-	print STDERR strftime("%b %e %H:%M:%S", localtime), "\t\tVelveth with hash value $hv finished.\n";
+    #print the objects to the log file...
+    {
+	lock($$semRef);
+	print $OUT $assembly->toStringNoV() if !$verbose;
+	print $OUT $assembly->toString() if $verbose;
+    }
+    
+    {
+	lock(%assemblies);
+	my $ass_str = freeze($assembly);
+	$assemblies{$anum} = $ass_str;
+    }
+    
+    {
+	lock($current_threads);
+	$current_threads --;
+    }
+    print STDERR strftime("%b %e %H:%M:%S", localtime), "\t\tVelveth with hash value $hv finished.\n";
 }
 
 #
@@ -590,8 +660,8 @@ sub runVelveth{
 sub runVelvetg{
 
 	{
-		lock($current_threads);
-		$current_threads ++;
+	    lock($current_threads);
+	    $current_threads ++;
 	}
 	
 	my $vv = shift;
@@ -605,41 +675,41 @@ sub runVelvetg{
 	print STDERR strftime("%b %e %H:%M:%S", localtime), "\t\tRunning vanilla velvetg on hash value: " . $assembly->{hashval} . "\n";
 
 	#make the velvetg commandline.
-    my $vgline = $prefix . "_data_" . $assembly->{hashval};
+	my $vgline = $prefix . "_data_" . $assembly->{hashval};
 	
 	$vgline .= " $vgoptions";
 	$vgline .= " -clean yes";
 
-    #save the velvetg commandline in the assembly.
-    $assembly->{pstringg} = $vgline;
+	#save the velvetg commandline in the assembly.
+	$assembly->{pstringg} = $vgline;
 	
 	#save the velvetg version in the assembly.
 	$assembly->{versiong} = $vv;
 
-    #run velvetg
-    my $vgresponse = VelvetOpt::gwrap::objectVelvetg($assembly);
-
-    unless($vgresponse){ die "Velvetg didn't run on the directory $vgline.\n$!\n";}
-
-    #run the assembly details routine..
-    $assembly->getAssemblyDetails();
-
-    #print the objects to the log file...
+	#run velvetg
+	my $vgresponse = VelvetOpt::gwrap::objectVelvetg($assembly);
+	
+	unless($vgresponse){ die "Velvetg didn't run on the directory $vgline.\n$!\n";}
+	
+	#run the assembly details routine..
+	$assembly->getAssemblyDetails();
+	
+	#print the objects to the log file...
 	{
-		lock($$semRef);
-		print $OUT $assembly->toStringNoV() if !$verbose;
-		print $OUT $assembly->toString() if $verbose;
+	    lock($$semRef);
+	    print $OUT $assembly->toStringNoV() if !$verbose;
+	    print $OUT $assembly->toString() if $verbose;
 	}
 	
 	{
-		lock(%assemblies);
-		my $ass_str = freeze($assembly);
-		$assemblies{$anum} = $ass_str;
+	    lock(%assemblies);
+	    my $ass_str = freeze($assembly);
+	    $assemblies{$anum} = $ass_str;
 	}
 	
 	{
-		lock($current_threads);
-		$current_threads --;
+	    lock($current_threads);
+	    $current_threads --;
 	}
 	print STDERR strftime("%b %e %H:%M:%S", localtime), "\t\tVelvetg on hash value: " . $assembly->{hashval} . " finished.\n";
 }
